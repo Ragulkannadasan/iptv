@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Premium IPTV</title>
+  <meta name="description" content="Watch 12,000+ live TV channels instantly in your browser.">
+  
+  <!-- Modern Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+</head>
+<body>
+  
+  <header class="header">
+    <div class="logo">IPTV<span class="accent">.</span></div>
+    <div class="search-container">
+      <input type="text" id="search-input" placeholder="Search channels or categories..." autocomplete="off">
+    </div>
+  </header>
+
+  <main id="main-content">
+    <div id="loading" class="center-message">
+      <div class="spinner"></div>
+      <h2>Loading 12,000+ Channels...</h2>
+    </div>
+    <div id="error" class="center-message hidden">
+      <h2 id="error-text">Failed to load channels.</h2>
+    </div>
+    
+    <div id="categories-container">
+      <!-- Categories will be injected here via JS -->
+    </div>
+  </main>
+
+  <!-- Video Modal -->
+  <dialog id="video-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title">Channel Name</h3>
+        <button id="close-modal" aria-label="Close video">&times;</button>
+      </div>
+      <div class="video-container">
+        <div id="video-error" class="video-error hidden">Stream unavailable</div>
+        <video id="video-player" controls autoplay playsinline></video>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
