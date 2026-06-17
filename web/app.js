@@ -2,9 +2,10 @@ const PLAYLIST_URL = 'https://iptv-org.github.io/iptv/index.m3u';
 
 // State
 let allChannels = [];
-let groupedChannels = []; // Array of { category, items }
 let filteredGroups = [];
 let hlsInstance = null;
+let userFavorites = new Set();
+let currentView = 'home';
 
 // DOM Elements
 const loadingEl = document.getElementById('loading');
@@ -17,6 +18,9 @@ const videoModal = document.getElementById('video-modal');
 const videoPlayer = document.getElementById('video-player');
 const modalTitle = document.getElementById('modal-title');
 const closeModalBtn = document.getElementById('close-modal');
+const homeViewEl = document.getElementById('home-view');
+const favViewEl = document.getElementById('favorites-view');
+const favGridEl = document.getElementById('favorites-grid');
 const videoError = document.getElementById('video-error');
 
 // Parser
@@ -169,9 +173,10 @@ async function loadPlaylist() {
     loadingEl.querySelector('h2').textContent = 'Analyzing 12,000+ Channels...';
 
     // Fetch playlist and API data concurrently for speed
-    const [playlistRes, apiRes] = await Promise.all([
+    const [playlistRes, apiRes, favRes] = await Promise.all([
       fetch(PLAYLIST_URL),
-      fetch('https://iptv-org.github.io/api/channels.json').catch(() => null)
+      fetch('https://iptv-org.github.io/api/channels.json').catch(() => null),
+      fetch('default_favorites.json').catch(() => null)
     ]);
 
     if (!playlistRes.ok) throw new Error('Failed to fetch playlist');
@@ -184,6 +189,16 @@ async function loadPlaylist() {
           apiTamilTvgIds.add(c.id);
         }
       });
+    }
+
+    // Handle Favorites
+    const storedFavs = localStorage.getItem('iptv_favorites');
+    if (storedFavs) {
+      userFavorites = new Set(JSON.parse(storedFavs));
+    } else if (favRes && favRes.ok) {
+      const defaultFavs = await favRes.json();
+      userFavorites = new Set(defaultFavs);
+      localStorage.setItem('iptv_favorites', JSON.stringify([...userFavorites]));
     }
     
     allChannels = parseM3U(text);
@@ -198,7 +213,31 @@ async function loadPlaylist() {
   }
 }
 
+function isChannelFavorite(channel) {
+  if (userFavorites.has(channel.name) || userFavorites.has(channel.id)) return true;
+  if (channel.tvgId) {
+    if (userFavorites.has(channel.tvgId)) return true;
+    const baseId = channel.tvgId.split('@')[0];
+    if (userFavorites.has(baseId)) return true;
+  }
+  return false;
+}
+
 // Rendering
+window.toggleFavorite = function(e, channelName) {
+  e.stopPropagation();
+  if (userFavorites.has(channelName)) {
+    userFavorites.delete(channelName);
+  } else {
+    userFavorites.add(channelName);
+  }
+  localStorage.setItem('iptv_favorites', JSON.stringify([...userFavorites]));
+  if (currentView === 'favorites') {
+    renderFavoritesView();
+  }
+  applyFilters();
+};
+
 function createChannelCard(channel) {
   const card = document.createElement('div');
   card.className = 'channel-card';
@@ -206,6 +245,13 @@ function createChannelCard(channel) {
 
   const imgWrapper = document.createElement('div');
   imgWrapper.className = 'card-image-wrapper';
+
+  const isFav = isChannelFavorite(channel);
+  const favBtn = document.createElement('button');
+  favBtn.className = 'fav-btn' + (isFav ? ' active' : '');
+  favBtn.innerHTML = '★';
+  favBtn.onclick = (e) => window.toggleFavorite(e, channel.name);
+  imgWrapper.appendChild(favBtn);
 
   if (channel.logo) {
     const img = document.createElement('img');
@@ -320,7 +366,17 @@ function openVideo(channel) {
     if (hlsInstance) {
       hlsInstance.destroy();
     }
-    hlsInstance = new Hls({ maxBufferLength: 30 });
+    hlsInstance = new Hls({ 
+      maxBufferLength: 60,
+      maxMaxBufferLength: 600,
+      manifestLoadingMaxRetry: 5,
+      levelLoadingMaxRetry: 5,
+      fragLoadingMaxRetry: 5,
+      enableWorker: true,
+      lowLatencyMode: false,
+      autoStartLoad: true
+    });
+    
     hlsInstance.loadSource(channel.url);
     hlsInstance.attachMedia(videoPlayer);
     
@@ -338,6 +394,7 @@ function openVideo(channel) {
             hlsInstance.recoverMediaError();
             break;
           default:
+            videoError.textContent = 'Channel is offline, geo-blocked, or blocking connections (CORS).';
             videoError.classList.remove('hidden');
             hlsInstance.destroy();
             break;
@@ -378,6 +435,87 @@ videoModal.addEventListener('click', (e) => {
     closeVideo();
   }
 });
+
+function renderFavoritesView() {
+  favGridEl.innerHTML = '';
+  const favoriteChannels = allChannels.filter(c => isChannelFavorite(c));
+  
+  const uniqueFavs = Array.from(new Set(favoriteChannels.map(c => c.name)))
+    .map(name => favoriteChannels.find(c => c.name === name));
+
+  if (uniqueFavs.length === 0) {
+    favGridEl.innerHTML = '<div class="center-message" style="grid-column: 1/-1; height: 30vh;"><p style="color: var(--text-secondary);">No favorites added yet.</p></div>';
+    return;
+  }
+
+  uniqueFavs.forEach(channel => {
+    const card = createChannelCard(channel);
+    favGridEl.appendChild(card);
+  });
+}
+
+function switchView(view) {
+  currentView = view;
+  if (view === 'home') {
+    homeViewEl.classList.remove('hidden');
+    favViewEl.classList.add('hidden');
+  } else if (view === 'favorites') {
+    homeViewEl.classList.add('hidden');
+    favViewEl.classList.remove('hidden');
+    renderFavoritesView();
+  }
+}
+
+// Navigation Logic
+const navHome = document.getElementById('nav-home');
+const navSearch = document.getElementById('nav-search');
+const navFav = document.getElementById('nav-favorites');
+
+const sideNavHome = document.getElementById('side-nav-home');
+const sideNavSearch = document.getElementById('side-nav-search');
+const sideNavFav = document.getElementById('side-nav-favorites');
+
+function setActiveNav(action) {
+  [navHome, navSearch, navFav, sideNavHome, sideNavSearch, sideNavFav].forEach(el => {
+    if (el) el.classList.remove('active');
+  });
+
+  if (action === 'home') {
+    if (navHome) navHome.classList.add('active');
+    if (sideNavHome) sideNavHome.classList.add('active');
+  } else if (action === 'search') {
+    if (navSearch) navSearch.classList.add('active');
+    if (sideNavSearch) sideNavSearch.classList.add('active');
+  } else if (action === 'favorites') {
+    if (navFav) navFav.classList.add('active');
+    if (sideNavFav) sideNavFav.classList.add('active');
+  }
+}
+
+function handleNavClick(action) {
+  setActiveNav(action);
+  if (action === 'home') {
+    switchView('home');
+    searchInput.value = '';
+    applyFilters();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } else if (action === 'search') {
+    switchView('home');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => searchInput.focus(), 300);
+  } else if (action === 'favorites') {
+    switchView('favorites');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
+
+if (navHome) navHome.addEventListener('click', () => handleNavClick('home'));
+if (navSearch) navSearch.addEventListener('click', () => handleNavClick('search'));
+if (navFav) navFav.addEventListener('click', () => handleNavClick('favorites'));
+
+if (sideNavHome) sideNavHome.addEventListener('click', () => handleNavClick('home'));
+if (sideNavSearch) sideNavSearch.addEventListener('click', () => handleNavClick('search'));
+if (sideNavFav) sideNavFav.addEventListener('click', () => handleNavClick('favorites'));
 
 // Init
 loadPlaylist();
